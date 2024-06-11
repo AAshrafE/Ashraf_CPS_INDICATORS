@@ -918,6 +918,8 @@ FROM(
 SELECT b.sk_customer,
        CONVERT(NVARCHAR(32), 
 	   CASE
+	   WHEN OVERRIDE.SK_Customer IS NOT NULL AND OVERRIDE.MTR_VALUE = 'ON' THEN 'ON'
+	   WHEN OVERRIDE.SK_Customer IS NOT NULL AND OVERRIDE.MTR_VALUE = 'OFF' AND wl.sk_customer IS NULL THEN 'OFF'
            WHEN succ_rate < @Success_Rate_threshhold /* when less than half of shipped items are delivered */
                 AND nr_shipped_orders > @Nr_shipped_orders_threshhold
                 -- AND isnull(dsc_account_type, '') <> 'jforce' --: Removed on 20180105 due to ticket nr 2550
@@ -951,6 +953,10 @@ SELECT b.sk_customer,
            WHEN bademail.SK_CUSTOMER IS NOT NULL THEN 1
            ELSE 0
        END AS FLG_EMAIL_BLACKLIST,
+       CASE
+	   WHEN OVERRIDE.SK_Customer IS NOT NULL THEN 1
+	   ELSE 0
+       END AS FLG_OVERRIDED_VALUE,
  	
 	   CONVERT(NVARCHAR(32),
 	    CASE WHEN @Country in ('NG','EG','KE') THEN
@@ -1157,7 +1163,18 @@ LEFT JOIN #blacklisted_phonenumber_customeraccounts badphone on b.SK_CUSTOMER = 
 LEFT JOIN #blacklisted_email_customeraccounts bademail on b.SK_CUSTOMER = bademail.SK_CUSTOMER
 LEFT JOIN #last3m_blacklist_customers last3m on b.sk_customer = last3m.sk_customer
 LEFT JOIN #cancellation_customers canc on canc.sk_customer=b.sk_customer
-FULL JOIN #rma_abuse rmaab on b.sk_customer = rmaab.sk_customer   
+FULL JOIN #rma_abuse rmaab on b.sk_customer = rmaab.sk_customer 
+LEFT JOIN (
+	SELECT 
+		TMP_OVR.SK_CUSTOMER
+		TMP_OVR.MTR_VALUE
+	FROM #TMP_CPS_OVERRIDE TMP_OVR
+	LEFT JOIN DBO.FCT_CPS_INDICATORS CPS ON 
+					CPS.SK_CUSTOMER = TMP_OVR.SK_CUSTOMER
+                                    	AND CPS.DD_DIMENSION = 'POSTPAYMENT'
+					AND CPS.SK_DATE > TMP_OVR.SK_DATE
+	WHERE CPS.SK_CUSTOMER IS NULL AND TMP_OVR.DIMENSION = 'POSTPAYMENT'
+) OVERRIDE ON OVERRIDE.SK_CUSTOMER = b.SK_CUSTOMER
 WHERE cod_cas IS NOT NULL
 
  
@@ -1218,7 +1235,7 @@ SELECT FORMAT(date_created,'yyyyMMdd') AS SK_DATE
 	  ,u.MTR_CANCELLATION_ORDER
 	  ,u.MTR_CANCELLATION_ITEM
 	  ,u.MTR_CANCELLATION_RATE
-	  ,0 AS FLG_OVERRIDED_VALUE
+	  ,[FLG_OVERRIDED_VALUE]
 INTO #PRE_FINAL
 FROM #final_insert fi
  --) s
